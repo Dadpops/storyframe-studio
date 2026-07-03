@@ -56,6 +56,23 @@ And it all starts from your worlds:
 
 ![The worlds screen](assets/screenshots/01-worlds.png)
 
+## Connections — the world model
+
+Cards don't sit in isolation. Link an event to the characters it involves and the
+setting it happens in; a character to the settings they belong to. Each card then
+shows its connections as clickable chips **coloured by the type they point to** —
+and the reverse links are computed automatically, so a location's card lists the
+events that happened there and the people who belong to it, with no extra data
+stored.
+
+![An event card showing its connections to a character and a setting](assets/screenshots/08-connections.png)
+
+This is what turns a pile of cards into a *world model* — and it's why the event's
+free-text "Who's involved" field exists alongside real character links: loose
+mentions for anyone, hard links for the cards that earn one. Links are stored as
+ids in the `World` JSON, round-trip losslessly, and are scrubbed automatically
+when a linked entity is deleted (no dangling references).
+
 ---
 
 ## Run it
@@ -78,7 +95,8 @@ npm run screenshots  # seed a demo world and capture the frames above
 - **`npm run build`** — reads `src/index.html`, inlines `src/app.js`, writes the
   single-file `dist/storyframe-studio.html`. No bundler, no transpile.
 - **`npm test`** — drives the real app in jsdom and asserts the core flows
-  (init → wizard → card, CSV header, JSON round-trip, framework summary).
+  (init → wizard → card, CSV header, JSON round-trip, framework summary,
+  entity linking + computed reverse links + delete-cleanup) — 10 checks.
 - **`npm run screenshots`** — builds, seeds *The Ashfall Chronicles*, and drives
   a headless Chromium to each screen (1440×900 @2x → `assets/screenshots/`, plus
   16:10 WebP copies ≤300 KB → `assets/portfolio/`).
@@ -115,6 +133,7 @@ Entity = {
   id, type: "character" | "setting" | "event" | "framework", name, created,
   // character / setting / event:
   data: { [fieldKey]: string | string[] },
+  links: { [relKey]: entityId[] },   // relationship layer — ids, not names
   // framework blueprints:
   frameworkKey, frameworkName,
   answers: { [stepIndex]: { choice: number|null, note: string } },
@@ -184,16 +203,35 @@ Add a `SCHEMAS.<type>` entry and its accent colour in `ACCENTS`, then include th
 type in `ENTITY_TYPES`. Everything else (wizard, card, dashboard grouping, CSV)
 picks it up.
 
+### Add a relationship
+
+Add an entry to `RELATIONS[<sourceType>]`. The wizard grows a link-picker step,
+the card renders the connection, and the target type's card shows the reverse
+link automatically — no other code changes:
+
+```js
+RELATIONS.event.push({
+  key: "faction", label: "Aligned with", target: "faction",
+  reverseLabel: "Events involving this faction",
+  teach: `<p>…why linking matters…</p>`,
+  example: "…",
+  // single: true  // uncomment for a one-pick link
+});
+```
+
 ---
 
 ## Roadmap
 
-Prioritized, outcome-first — recorded here, not yet built:
+**Shipped since v1:**
 
-- **v2 — Relationship layer (highest value).** Link entities: an event
-  references its characters and setting; a character belongs to settings. Turns
-  "a pile of cards" into a *world model* — the reason the event `who` field
-  already stores names. Built deliberately, not bolted on.
+- ✅ **Relationship layer.** Entities link into a navigable *world model* (events
+  → characters & settings, characters → settings), with computed reverse links
+  and clickable, colour-coded connections on every card. See
+  [Connections](#connections--the-world-model) above.
+
+Still ahead — prioritized, outcome-first, recorded here but not yet built:
+
 - **v2 — More entity types.** Factions/orgs, items/artifacts, magic/tech
   systems, lore. Compositions of the existing spine.
 - **v2 — More frameworks.** Save the Cat (15-beat), Kishōtenketsu (four-act).

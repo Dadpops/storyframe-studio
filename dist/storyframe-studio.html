@@ -424,6 +424,30 @@
 
     .card-actions { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
 
+    /* Connections — the relationship layer on a card */
+    .card-connections { margin-top: .5rem; padding-top: .7rem; border-top: 2px dotted var(--line-2); }
+    .card-connections__label { font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-3); margin-bottom: .3rem; }
+    .conn-chip {
+      font-family: var(--sans); font-size: .8rem; font-weight: 600; cursor: pointer;
+      padding: .24em .7em .24em .55em; border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+      color: color-mix(in srgb, var(--accent) 74%, var(--ink));
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      transition: transform .1s ease, box-shadow .1s ease;
+    }
+    .conn-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+    .conn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .conn-chip::before { content: "→ "; opacity: .55; }
+
+    /* Link picker in the wizard */
+    .links-hint { font-size: .82rem; color: var(--ink-3); margin-bottom: .5rem; }
+    .links-empty {
+      font-size: .9rem; color: var(--ink-2);
+      background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+      border: 1px dashed var(--line-2); border-radius: 10px; padding: .85rem 1rem;
+    }
+    .link-choice .choice__radio { border-radius: 6px; }
+
     /* ============================================================
        Framework module
        ============================================================ */
@@ -818,6 +842,73 @@
   const ACCENTS = { character: "#7c4f80", setting: "#2c7c78", event: "#bd5a34", framework: "#5c6689" };
 
   /* ==========================================================================
+   * Relationship layer (roadmap v2 — the "world model").
+   * Links live on `entity.links = { [relKey]: [entityId, ...] }` — pure data,
+   * lossless in the World JSON, backward-compatible (missing => no links).
+   * Reverse links are COMPUTED on the fly, never stored (no duplication, no
+   * drift). Adding a new relation here is content-only.
+   * ======================================================================== */
+  const RELATIONS = {
+    character: [
+      {
+        key: "settings", label: "Belongs to", target: "setting", reverseLabel: "Characters here",
+        teach: `<p>Link this character to the <strong>settings they belong to</strong> — where they live, work, or hold power. This is what turns a stack of cards into a <em>world model</em>: the character and the place now cross-reference each other, and you can click straight between them.</p>`,
+        example: "Kestrel Vance → The Ashfall Market (he works its debt every day).",
+      },
+    ],
+    event: [
+      {
+        key: "characters", label: "Linked characters", target: "character", reverseLabel: "Appears in",
+        teach: `<p>Your <em>Who's involved</em> field lists everyone loosely — including people who'll never get their own card. Here you <strong>link the ones that do</strong>, so the event and each character point at each other. Later you can click through to trace who was where.</p>`,
+        example: "The Drowning of the North Fleet → Kestrel Vance.",
+      },
+      {
+        key: "setting", label: "Takes place in", target: "setting", single: true, reverseLabel: "Events here",
+        teach: `<p>Anchor the event to <strong>where it happened</strong>. Once linked, that setting's own card lists this event automatically — your locations start to carry their own history instead of being inert backdrops.</p>`,
+        example: "The Drowning of the North Fleet → The Ashfall Market's harbor.",
+      },
+    ],
+    setting: [],
+  };
+
+  function relationsFor(type) { return RELATIONS[type] || []; }
+
+  // The wizard walks content steps (SCHEMA) followed by relation steps (links).
+  function wizardSteps(type) {
+    const schema = SCHEMAS[type];
+    if (!schema) return [];
+    const linkSteps = relationsFor(type).map((r) => ({
+      key: r.key, label: r.label, type: "links", target: r.target, single: r.single,
+      teach: r.teach, example: r.example, relation: r,
+    }));
+    return schema.steps.concat(linkSteps);
+  }
+
+  // Resolve a card's connections: forward links + computed reverse links.
+  // Returns [{ label, items: [{ id, name, type }] }, ...].
+  function resolveConnections(world, entity) {
+    if (!world || !entity) return [];
+    const byId = (id) => world.entities.find((e) => e.id === id);
+    const groups = [];
+    for (const rel of relationsFor(entity.type)) {
+      const ids = (entity.links && entity.links[rel.key]) || [];
+      const items = ids.map(byId).filter(Boolean).map((e) => ({ id: e.id, name: e.name, type: e.type }));
+      if (items.length) groups.push({ label: rel.label, items });
+    }
+    const reverse = {};
+    for (const other of world.entities) {
+      if (other.id === entity.id) continue;
+      for (const rel of relationsFor(other.type)) {
+        if (rel.target !== entity.type) continue;
+        const ids = (other.links && other.links[rel.key]) || [];
+        if (ids.includes(entity.id)) (reverse[rel.reverseLabel] = reverse[rel.reverseLabel] || []).push({ id: other.id, name: other.name, type: other.type });
+      }
+    }
+    for (const label in reverse) groups.push({ label, items: reverse[label] });
+    return groups;
+  }
+
+  /* ==========================================================================
    * 3. Story-framework module (spec §6)
    * Each framework is pure content: an ordered list of nodes. Adding "Save the
    * Cat" or "Kishotenketsu" later is a data addition with no new code.
@@ -1001,6 +1092,11 @@
   function deleteEntity(world, entityId) {
     const i = world.entities.findIndex((e) => e.id === entityId);
     if (i >= 0) world.entities.splice(i, 1);
+    // Scrub dangling references so no link points at a deleted entity.
+    for (const e of world.entities) {
+      if (!e.links) continue;
+      for (const k in e.links) if (Array.isArray(e.links[k])) e.links[k] = e.links[k].filter((id) => id !== entityId);
+    }
   }
 
   function entityCounts(world) {
@@ -1026,6 +1122,10 @@
       type: entity.type, accent: ACCENTS[entity.type], typeLabel: schema.label,
       name: entity.name || "Untitled", tagline: entity.data.tagline || "",
       rows, worldName: world.name,
+      connections: resolveConnections(world, entity).map((g) => ({
+        label: g.label,
+        items: g.items.map((it) => ({ id: it.id, name: it.name, type: it.type, accent: ACCENTS[it.type] })),
+      })),
     };
   }
 
@@ -1100,6 +1200,13 @@
           if (val == null || val === "") continue;
           lines.push([e.type, e.name, tagline, step.label, val].map(csvEscape).join(","));
         }
+        // Relationship links, resolved to names (spec roadmap v2).
+        for (const rel of relationsFor(e.type)) {
+          const ids = (e.links && e.links[rel.key]) || [];
+          if (!ids.length) continue;
+          const names = ids.map((id) => { const t = world.entities.find((x) => x.id === id); return t ? t.name : null; }).filter(Boolean);
+          if (names.length) lines.push([e.type, e.name, tagline, rel.label, names.join("; ")].map(csvEscape).join(","));
+        }
       }
     }
     return lines.join("\r\n");
@@ -1137,6 +1244,10 @@
       base.plaintext = e.plaintext || "";
     } else {
       base.data = e.data && typeof e.data === "object" ? e.data : {};
+      base.links = {};
+      if (e.links && typeof e.links === "object") {
+        for (const k in e.links) if (Array.isArray(e.links[k])) base.links[k] = e.links[k].slice();
+      }
     }
     return base;
   }
@@ -1335,9 +1446,11 @@
         const sub = e.type === "framework"
           ? (e.frameworkName || "Blueprint")
           : (e.data.tagline || "No tagline yet");
-        const meta = e.type === "framework"
-          ? (e.summary || "framework")
-          : SCHEMAS[e.type].label;
+        let meta = e.type === "framework" ? (e.summary || "framework") : SCHEMAS[e.type].label;
+        if (e.type !== "framework") {
+          const connCount = resolveConnections(world, e).reduce((n, g) => n + g.items.length, 0);
+          if (connCount) meta += " · 🔗 " + connCount;
+        }
         mini.append(el("button", { class: "mini-card", dataset: { accent: t }, onClick: () => openEntity(e) },
           el("span", { class: "mc-name" }, e.name),
           el("span", { class: "mc-sub" }, sub),
@@ -1357,18 +1470,18 @@
   /* ---- Wizard (spec §7.3) ------------------------------------------------- */
 
   function openWizard(type, entityId) {
-    const schema = SCHEMAS[type];
+    const steps = wizardSteps(type);
     const draft = {};
     let maxVisited = 0;
     if (entityId) {
       const e = activeWorld().entities.find((x) => x.id === entityId);
-      for (const s of schema.steps) {
-        const v = e.data[s.key];
-        draft[s.key] = Array.isArray(v) ? v.slice() : v == null ? "" : v;
+      for (const s of steps) {
+        if (s.type === "links") draft[s.key] = e.links && Array.isArray(e.links[s.key]) ? e.links[s.key].slice() : [];
+        else { const v = e.data[s.key]; draft[s.key] = Array.isArray(v) ? v.slice() : v == null ? "" : v; }
       }
-      maxVisited = schema.steps.length - 1;
+      maxVisited = steps.length - 1;
     } else {
-      for (const s of schema.steps) draft[s.key] = s.type === "chips" ? [] : "";
+      for (const s of steps) draft[s.key] = s.type === "chips" || s.type === "links" ? [] : "";
     }
     ui.wizard = { type, entityId: entityId || null, stepIndex: 0, draft, maxVisited, errored: false };
     go({ screen: "wizard" });
@@ -1378,8 +1491,9 @@
     const w = ui.wizard;
     if (!w || !activeWorld()) { go({ screen: "worlds" }); return el("div"); }
     const schema = SCHEMAS[w.type];
-    const step = schema.steps[w.stepIndex];
-    const isLast = w.stepIndex === schema.steps.length - 1;
+    const allSteps = wizardSteps(w.type);
+    const step = allSteps[w.stepIndex];
+    const isLast = w.stepIndex === allSteps.length - 1;
 
     const wrap = el("div", { class: "wizard", dataset: { accent: w.type } });
 
@@ -1387,9 +1501,9 @@
     const rail = el("aside", { class: "wiz-rail" });
     rail.append(el("div", { class: "eyebrow" }, w.entityId ? "Editing " + w.type : schema.eyebrow));
     rail.append(el("div", { class: "wiz-rail__title" }, w.draft[schema.nameField] || schema.label));
-    rail.append(el("div", { class: "wiz-rail__sub" }, "Step " + (w.stepIndex + 1) + " of " + schema.steps.length));
+    rail.append(el("div", { class: "wiz-rail__sub" }, "Step " + (w.stepIndex + 1) + " of " + allSteps.length));
     const steps = el("ol", { class: "wiz-steps" });
-    schema.steps.forEach((s, i) => {
+    allSteps.forEach((s, i) => {
       const cls = "wiz-step" + (i === w.stepIndex ? " is-active" : "") + (i < w.stepIndex || (i <= w.maxVisited && i !== w.stepIndex) ? " is-done" : "");
       const reachable = i <= w.maxVisited;
       steps.append(el("li", {},
@@ -1443,6 +1557,8 @@
       conflict: "What's the tension here?", detail: "Landmarks & rules",
       when: "When does it happen?", kind: "What kind of event?", who: "Who's involved?",
       what: "What actually happens?", consequence: "What changes afterward?",
+      settings: "Where do they belong?", characters: "Link the characters involved",
+      setting: "Where does it happen?",
     };
     return map[step.key] || step.label;
   }
@@ -1478,10 +1594,46 @@
       field.append(box);
     } else if (step.type === "chips") {
       field.append(renderChipsInput(step, w));
+    } else if (step.type === "links") {
+      field.append(renderLinksField(step, w));
     }
 
     if (w.errored && step.required) field.append(el("div", { class: "field__error" }, step.label + " is required to continue."));
     return field;
+  }
+
+  function renderLinksField(step, w) {
+    const world = activeWorld();
+    const selected = Array.isArray(w.draft[step.key]) ? w.draft[step.key] : [];
+    const options = world.entities.filter((e) => e.type === step.target && e.id !== w.entityId);
+    const box = el("div", {});
+    if (!options.length) {
+      box.append(el("div", { class: "links-empty" },
+        "No " + step.target + "s in this world yet. Create one, then come back and link it here."));
+      return box;
+    }
+    box.append(el("div", { class: "links-hint" }, step.single ? "Pick one." : "Pick any that apply."));
+    const list = el("div", { class: "choices" });
+    options.forEach((opt) => {
+      const isSel = selected.includes(opt.id);
+      list.append(el("button", {
+        class: "choice link-choice" + (isSel ? " is-selected" : ""), type: "button",
+        "aria-pressed": isSel ? "true" : "false", style: "--accent:" + ACCENTS[opt.type],
+        onClick: () => {
+          let arr = Array.isArray(w.draft[step.key]) ? w.draft[step.key].slice() : [];
+          if (step.single) arr = isSel ? [] : [opt.id];
+          else arr = isSel ? arr.filter((id) => id !== opt.id) : arr.concat(opt.id);
+          w.draft[step.key] = arr;
+          render();
+        },
+      },
+        el("span", { class: "choice__radio", "aria-hidden": "true" }),
+        el("span", {},
+          el("span", { class: "choice__label" }, opt.name),
+          el("span", { class: "choice__hint" }, " — " + (opt.data && opt.data.tagline ? opt.data.tagline : SCHEMAS[opt.type].label)))));
+    });
+    box.append(list);
+    return box;
   }
 
   function renderChipsInput(step, w) {
@@ -1537,7 +1689,7 @@
     render();
   }
 
-  function currentStep() { return SCHEMAS[ui.wizard.type].steps[ui.wizard.stepIndex]; }
+  function currentStep() { return wizardSteps(ui.wizard.type)[ui.wizard.stepIndex]; }
 
   function stepValueEmpty(step) {
     const v = ui.wizard.draft[step.key];
@@ -1552,8 +1704,8 @@
       render();
       return;
     }
-    const schema = SCHEMAS[ui.wizard.type];
-    if (ui.wizard.stepIndex < schema.steps.length - 1) {
+    const steps = wizardSteps(ui.wizard.type);
+    if (ui.wizard.stepIndex < steps.length - 1) {
       ui.wizard.stepIndex++;
       ui.wizard.maxVisited = Math.max(ui.wizard.maxVisited, ui.wizard.stepIndex);
       ui.wizard.errored = false;
@@ -1562,8 +1714,8 @@
   }
 
   function wizardAdvanceOrCommit() {
-    const schema = SCHEMAS[ui.wizard.type];
-    if (ui.wizard.stepIndex === schema.steps.length - 1) commitEntity();
+    const steps = wizardSteps(ui.wizard.type);
+    if (ui.wizard.stepIndex === steps.length - 1) commitEntity();
     else wizardNext();
   }
 
@@ -1578,9 +1730,10 @@
   function commitEntity() {
     const w = ui.wizard;
     const schema = SCHEMAS[w.type];
+    const steps = wizardSteps(w.type);
     // Full required validation (spec §7.3).
-    for (let i = 0; i < schema.steps.length; i++) {
-      const s = schema.steps[i];
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
       const v = w.draft[s.key];
       if (s.required && (v == null || (Array.isArray(v) ? !v.length : String(v).trim() === ""))) {
         w.stepIndex = i;
@@ -1593,14 +1746,17 @@
     const world = activeWorld();
     let entity;
     if (w.entityId) entity = world.entities.find((e) => e.id === w.entityId);
-    if (!entity) { entity = { id: uid("ent"), type: w.type, created: Date.now(), data: {} }; world.entities.push(entity); }
+    if (!entity) { entity = { id: uid("ent"), type: w.type, created: Date.now(), data: {}, links: {} }; world.entities.push(entity); }
     const data = {};
-    for (const s of schema.steps) {
+    const links = {};
+    for (const s of steps) {
       let v = w.draft[s.key];
+      if (s.type === "links") { links[s.key] = Array.isArray(v) ? v.slice() : []; continue; }
       if (Array.isArray(v)) v = v.slice();
       if (v != null && v !== "") data[s.key] = v;
     }
     entity.data = data;
+    entity.links = links;
     entity.name = data[schema.nameField] || "Untitled";
     toast((w.entityId ? "Updated " : "Created ") + entity.name, "success");
     ui.wizard = null;
@@ -1643,6 +1799,20 @@
         el("div", { class: "card-row__k" }, row.label),
         el("div", { class: "card-row__v" }, v)));
     }
+    if (m.connections && m.connections.length) {
+      const conn = el("div", { class: "card-connections" });
+      conn.append(el("div", { class: "card-connections__label" }, "Connections"));
+      for (const g of m.connections) {
+        conn.append(el("div", { class: "card-row" },
+          el("div", { class: "card-row__k" }, g.label),
+          el("div", { class: "card-row__v" }, el("div", { class: "card-chips" },
+            g.items.map((it) => el("button", {
+              class: "conn-chip", type: "button", dataset: { accent: it.type },
+              onClick: () => { const wd = activeWorld(); const e = wd && wd.entities.find((x) => x.id === it.id); if (e) openEntity(e); },
+            }, it.name))))));
+      }
+      body.append(conn);
+    }
     card.append(body);
     card.append(el("footer", { class: "story-card__footer" },
       el("span", { class: "fmark" }, el("span", { class: "fdot", "aria-hidden": "true" }), m.worldName),
@@ -1679,6 +1849,14 @@
         '<div style="flex:1;">' + val + "</div></div>";
     }).join("");
     const taglineHtml = m.tagline ? '<div style="font-family:' + serif + ';font-style:italic;font-size:15px;opacity:.96;">“' + escapeHtml(m.tagline) + "”</div>" : "";
+    const connRows = (m.connections || []).map((g) => {
+      const chips = g.items.map((it) =>
+        '<span style="font-size:11px;font-weight:500;padding:2px 9px;border-radius:999px;margin:0 4px 4px 0;display:inline-block;background:' + mix(it.accent, "#fdfaf3", 0.86) + ";color:" + mix(it.accent, "#2a2521", 0.2) + ";border:1px solid " + mix(it.accent, "#ffffff", 0.55) + ';">' + escapeHtml(it.name) + "</span>").join("");
+      return '<div style="display:flex;gap:12px;padding:9px 0;border-bottom:1px solid #eee3d0;"><div style="width:88px;flex:none;font-family:' + mono + ";font-size:10px;text-transform:uppercase;letter-spacing:1px;color:" + accent + ';font-weight:600;padding-top:2px;">' + escapeHtml(g.label) + '</div><div style="flex:1;">' + chips + "</div></div>";
+    }).join("");
+    const connSection = connRows
+      ? '<div style="padding:0 24px 8px;"><div style="font-family:' + mono + ';font-size:10px;letter-spacing:1px;text-transform:uppercase;color:#8d8375;margin:2px 0 2px;">Connections</div>' + connRows + "</div>"
+      : "";
     return '' +
       '<div xmlns="http://www.w3.org/1999/xhtml" style="width:' + width + 'px;font-family:' + sans + ';background:#fdfaf3;border-radius:18px;overflow:hidden;border:1px solid #e2d7c1;">' +
         '<div style="background:linear-gradient(135deg,' + accent + "," + dark + ');color:#ffffff;padding:22px 24px 20px;">' +
@@ -1687,6 +1865,7 @@
           taglineHtml +
         "</div>" +
         '<div style="padding:18px 24px 8px;">' + rowsHtml + "</div>" +
+        connSection +
         '<div style="display:flex;justify-content:space-between;padding:12px 24px 16px;border-top:1px solid #eee3d0;font-family:' + mono + ';font-size:10px;letter-spacing:.5px;color:#8d8375;">' +
           "<span>" + escapeHtml(m.worldName) + "</span><span>Storyframe Studio</span>" +
         "</div>" +
@@ -2065,7 +2244,7 @@
     const world = createWorld("The Ashfall Chronicles", "A harbor city built in a dead volcano's crater.");
     store.activeId = world.id;
 
-    world.entities.push(normalizeEntity({
+    const kestrel = normalizeEntity({
       type: "character", name: "Kestrel Vance",
       data: {
         name: "Kestrel Vance",
@@ -2077,9 +2256,9 @@
         traits: ["Counts the exits", "Keeps his old prayer beads", "Never raises his voice"],
         tagline: "A holy man's conscience in a debt-collector's coat.",
       },
-    }));
+    });
 
-    world.entities.push(normalizeEntity({
+    const market = normalizeEntity({
       type: "setting", name: "The Ashfall Market",
       data: {
         name: "The Ashfall Market",
@@ -2090,9 +2269,9 @@
         detail: ["The Ash Gate", "No open flame after dusk", "The vendor who sells secrets"],
         tagline: "A marketplace where everything's for sale except the truth.",
       },
-    }));
+    });
 
-    world.entities.push(normalizeEntity({
+    const drowning = normalizeEntity({
       type: "event", name: "The Drowning of the North Fleet",
       data: {
         name: "The Drowning of the North Fleet",
@@ -2103,7 +2282,12 @@
         consequence: "The harbor never trusted the Guild again, and Kestrel left the priesthood the next morning.",
         tagline: "The night the sea was ordered to kill.",
       },
-    }));
+    });
+
+    world.entities.push(kestrel, market, drowning);
+    // Relationship layer: wire the world together so the demo shows connections.
+    kestrel.links = { settings: [market.id] };
+    drowning.links = { characters: [kestrel.id], setting: [market.id] };
 
     const answers = {
       0: { choice: null, note: "Kestrel works the Ashfall Market collecting Guild debts — respected, efficient, and quietly hollow." },
@@ -2158,9 +2342,9 @@
     store, ui, SCHEMAS, FRAMEWORKS,
     go, render, seedDemo,
     // data ops
-    createWorld, deleteWorld, importWorldFromJSON, addImportedWorld,
+    createWorld, deleteWorld, deleteEntity, importWorldFromJSON, addImportedWorld,
     serializeWorld, worldToCSV, cardModel, buildFrameworkEntity,
-    activeWorld, entityCounts,
+    activeWorld, entityCounts, resolveConnections, RELATIONS,
     // reset for test isolation
     reset: function () { store.projects.length = 0; store.activeId = null; ui.wizard = null; ui.fw = null; ui.view = { screen: "worlds", worldId: null, entityId: null }; },
     // UI-driving actions (same code paths as the buttons)

@@ -162,6 +162,56 @@ check("Framework flow reaches the summary screen after walking all nodes", () =>
   assert(/blueprint/i.test(appText()), "summary screen did not render blueprint content");
 });
 
+/* 8 — relationship layer */
+let linkWorld, linkChar, linkSetting, linkEvent;
+check("Linking an event to a character + setting stores links and renders connections", () => {
+  SF.reset();
+  linkWorld = SF.actions.newWorld("Link World");
+
+  SF.actions.openWizard("setting");
+  SF.actions.setField("name", "Harborton");
+  linkSetting = SF.actions.commit();
+
+  SF.actions.openWizard("character");
+  SF.actions.setField("name", "Mara Quell");
+  SF.actions.setField("settings", [linkSetting.id]); // link character → setting
+  linkChar = SF.actions.commit();
+
+  SF.actions.openWizard("event");
+  SF.actions.setField("name", "The Warehouse Fire");
+  SF.actions.setField("characters", [linkChar.id]);
+  SF.actions.setField("setting", [linkSetting.id]);
+  linkEvent = SF.actions.commit();
+
+  assert(linkEvent.links.characters.includes(linkChar.id), "event did not store character link");
+  assert(linkEvent.links.setting.includes(linkSetting.id), "event did not store setting link");
+  // We're on the event card now — it should show the linked names as connections.
+  const t = appText();
+  assert(/Mara Quell/.test(t) && /Harborton/.test(t), "event card missing connection names");
+  assert(doc.querySelectorAll(".conn-chip").length >= 2, "event card did not render connection chips");
+});
+
+/* 9 — reverse links are computed on the target */
+check("Reverse links surface on the linked setting (Characters here / Events here)", () => {
+  SF.actions.openCard(linkSetting.id);
+  const t = appText();
+  assert(/Characters here/.test(t), "setting card missing 'Characters here' reverse group");
+  assert(/Events here/.test(t), "setting card missing 'Events here' reverse group");
+  assert(/Mara Quell/.test(t), "setting card missing the character that belongs to it");
+  assert(/The Warehouse Fire/.test(t), "setting card missing the event that takes place in it");
+});
+
+/* 10 — links round-trip, and deletion scrubs dangling references */
+check("Links round-trip through JSON, and deleting an entity clears dangling links", () => {
+  const back = SF.importWorldFromJSON(SF.serializeWorld(linkWorld));
+  const ev = back.entities.find((e) => e.type === "event");
+  assert(ev.links.characters.length === 1 && ev.links.setting.length === 1, "links lost in round-trip");
+
+  SF.deleteEntity(linkWorld, linkChar.id);
+  const evAfter = linkWorld.entities.find((e) => e.type === "event");
+  assert(!evAfter.links.characters.includes(linkChar.id), "deleting the character left a dangling link on the event");
+});
+
 /* ---- report ------------------------------------------------------------- */
 const total = pass + fail;
 console.log("\n" + "-".repeat(48));

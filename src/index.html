@@ -423,6 +423,30 @@
 
     .card-actions { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; }
 
+    /* Connections — the relationship layer on a card */
+    .card-connections { margin-top: .5rem; padding-top: .7rem; border-top: 2px dotted var(--line-2); }
+    .card-connections__label { font-family: var(--mono); font-size: .62rem; text-transform: uppercase; letter-spacing: .14em; color: var(--ink-3); margin-bottom: .3rem; }
+    .conn-chip {
+      font-family: var(--sans); font-size: .8rem; font-weight: 600; cursor: pointer;
+      padding: .24em .7em .24em .55em; border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+      color: color-mix(in srgb, var(--accent) 74%, var(--ink));
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      transition: transform .1s ease, box-shadow .1s ease;
+    }
+    .conn-chip:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+    .conn-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .conn-chip::before { content: "→ "; opacity: .55; }
+
+    /* Link picker in the wizard */
+    .links-hint { font-size: .82rem; color: var(--ink-3); margin-bottom: .5rem; }
+    .links-empty {
+      font-size: .9rem; color: var(--ink-2);
+      background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+      border: 1px dashed var(--line-2); border-radius: 10px; padding: .85rem 1rem;
+    }
+    .link-choice .choice__radio { border-radius: 6px; }
+
     /* ============================================================
        Framework module
        ============================================================ */

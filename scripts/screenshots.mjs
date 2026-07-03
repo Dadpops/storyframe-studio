@@ -98,6 +98,16 @@ const FRAMES = [
       window.__SF.go({ screen: "fw-summary" });
     },
   },
+  {
+    name: "08-connections",
+    setup: () => {
+      // The event card is the causal hub — it shows both link types (linked
+      // characters + where it takes place), demonstrating the world model.
+      const w = window.__SF.activeWorld();
+      const ev = w.entities.find((e) => e.type === "event");
+      window.__SF.actions.openCard(ev.id);
+    },
+  },
 ];
 
 async function optimizeToPortfolio(pngBuffer, name) {
