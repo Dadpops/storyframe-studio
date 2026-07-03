@@ -36,5 +36,9 @@ const output = inlined.replace(/^<!DOCTYPE html>\s*/i, (m) => m + banner);
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, output, "utf8");
 
+// Also emit dist/index.html so the folder serves the app at its root (used by
+// the GitHub Pages deploy, and handy when serving dist/ statically).
+writeFileSync(resolve(root, "dist/index.html"), output, "utf8");
+
 const kb = (Buffer.byteLength(output, "utf8") / 1024).toFixed(1);
-console.log(`✓ Built dist/storyframe-studio.html (${kb} KB) — open it in any browser.`);
+console.log(`✓ Built dist/storyframe-studio.html + dist/index.html (${kb} KB) — open either in any browser.`);
