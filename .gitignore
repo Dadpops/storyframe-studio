@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Playwright runtime cache (browsers install to a shared cache, not the repo)
+test-results/
+playwright-report/
+
+# The original prompt lives in the repo at docs/BUILD_PROMPT.md; ignore the
+# working-folder copy so the tracked tree matches the spec layout.
+/STORYFRAME_BUILD_PROMPT.md
